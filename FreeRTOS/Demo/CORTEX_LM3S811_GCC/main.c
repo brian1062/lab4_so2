@@ -63,6 +63,7 @@
  */
 
 
+#include <stdio.h> 
 
 /* Environment includes. */
 #include "DriverLib.h"
@@ -100,6 +101,8 @@ efficient. */
 #define mainQUEUE_SIZE				( 3 )
 #define mainDEBOUNCE_DELAY			( ( TickType_t ) 150 / portTICK_PERIOD_MS )
 #define mainNO_DELAY				( ( TickType_t ) 0 )
+//this is for 10HZ
+#define SENSOR_TIME ((TickType_t)100 / portTICK_PERIOD_MS)
 /*
  * Configure the processor and peripherals for this demo.
  */
@@ -131,8 +134,15 @@ SemaphoreHandle_t xButtonSemaphore;
 
 /* The queue used to send strings to the print task for display on the LCD. */
 QueueHandle_t xPrintQueue;
-
-/*-----------------------------------------------------------*/
+#define T_MAX                		34
+#define T_MIN               		18
+static unsigned int temperature = 	26;
+//TASKS
+static void vSensorTask( void *pvParameters );
+//-----
+static uint32_t _dwRandNext=1 ;
+uint32_t rand_number( void );
+/*--------------Main function----------------------*/
 
 int main( void )
 {
@@ -154,9 +164,10 @@ int main( void )
 	vStartBlockingQueueTasks( mainBLOCK_Q_PRIORITY );
 
 	/* Start the tasks defined within the file. */
-	xTaskCreate( vCheckTask, "Check", configMINIMAL_STACK_SIZE, NULL, mainCHECK_TASK_PRIORITY, NULL );
-	xTaskCreate( vButtonHandlerTask, "Status", configMINIMAL_STACK_SIZE, NULL, mainCHECK_TASK_PRIORITY + 1, NULL );
-	xTaskCreate( vPrintTask, "Print", configMINIMAL_STACK_SIZE, NULL, mainCHECK_TASK_PRIORITY - 1, NULL );
+	//xTaskCreate( vCheckTask, "Check", configMINIMAL_STACK_SIZE, NULL, mainCHECK_TASK_PRIORITY, NULL );
+	xTaskCreate( vSensorTask, "Sensor", configMINIMAL_STACK_SIZE, NULL, mainCHECK_TASK_PRIORITY-1, NULL );
+	//xTaskCreate( vButtonHandlerTask, "Status", configMINIMAL_STACK_SIZE, NULL, mainCHECK_TASK_PRIORITY + 1, NULL );
+	xTaskCreate( vPrintTask, "Print", configMINIMAL_STACK_SIZE, NULL, mainCHECK_TASK_PRIORITY + 1, NULL );
 
 	/* Start the scheduler. */
 	vTaskStartScheduler();
@@ -166,8 +177,63 @@ int main( void )
 
 	return 0;
 }
-/*-----------------------------------------------------------*/
+/*----------------------------------------------------------------*/
+//https://www.freertos.org/uxTaskGetStackHighWaterMark.html
+/*------------------------TASKS-----------------------------------*/
+static void vSensorTask( void *pvParameters )
+{
+	UBaseType_t uxHighWaterMarkSensor;
+	TickType_t xLastExecutionTime;
+	portBASE_TYPE xErrorOccurred = pdFALSE;
+	/* Initialise xLastExecutionTime so the first call to vTaskDelayUntil()
+	works correctly. */
+	xLastExecutionTime = xTaskGetTickCount();
+	uxHighWaterMarkSensor = uxTaskGetStackHighWaterMark( NULL );
+	if(uxHighWaterMarkSensor < 1){
+		vTaskDelete(NULL);//stop task
+	}
 
+	for( ;; )
+	{
+		/* Perform this check every mainCHECK_DELAY milliseconds. */
+		vTaskDelayUntil( &xLastExecutionTime, SENSOR_TIME );
+		//read sensor
+		temperature = (rand_number()% 2)? temperature + 1 : temperature - 1;	
+		// if(rand_number()% 2){
+		// 	temperature ++;
+		// } else {
+		// 	temperature --;
+		// }
+		if(temperature > T_MAX){
+			temperature = T_MAX;
+		} else if (temperature < T_MIN){
+			temperature = T_MIN;
+		}
+
+		//xQueueSend( xPrintQueue, &temperature, portMAX_DELAY );
+
+		uxHighWaterMarkSensor = uxTaskGetStackHighWaterMark(NULL);
+		if(uxHighWaterMarkSensor < 1){
+			vTaskDelete(NULL);//stop task
+		}
+		if (xQueueSend(xPrintQueue, &temperature, mainCHECK_DELAY) != pdPASS)
+		{
+			OSRAMClear();
+			OSRAMStringDraw("FULL", 0, 0);
+			while (true){};
+		}
+	}
+}
+
+// From https://github.com/istarc/freertos/blob/master/FreeRTOS/Demo/CORTEX_A5_SAMA5D3x_Xplained_IAR/AtmelFiles/libboard_sama5d3x-ek/source/rand.c
+// generate random number
+uint32_t rand_number( void )
+{
+    _dwRandNext = _dwRandNext * 1103515245 + 12345 ;
+
+    return (uint32_t)(_dwRandNext/131072) % 65536 ;
+}
+/*----------------------------------------------------------------*/
 static void vCheckTask( void *pvParameters )
 {
 portBASE_TYPE xErrorOccurred = pdFALSE;
@@ -347,10 +413,10 @@ unsigned portBASE_TYPE uxLine = 0, uxRow = 0;
 	for( ;; )
 	{
 		/* Wait for a message to arrive. */
-		xQueueReceive( xPrintQueue, &pcMessage, portMAX_DELAY );
+		xQueueReceive( xPrintQueue, &pcMessage, SENSOR_TIME );
 
 		/* Write the message to the LCD. */
-		uxRow++;
+		//uxRow++;
 		uxLine++;
 		OSRAMClear();
 		OSRAMStringDraw( pcMessage, uxLine & 0x3f, uxRow & 0x01);

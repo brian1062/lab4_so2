@@ -69,6 +69,8 @@ to exclude the API function. */
 See http://www.FreeRTOS.org/RTOS-Cortex-M3-M4.html. */
 #define configMAX_SYSCALL_INTERRUPT_PRIORITY 	191 /* equivalent to 0xa0, or priority 5. */
 
-
+#define configUSE_TRACE_FACILITY 1
+#define INCLUDE_uxTaskGetStackHighWaterMark 1
+#define INCLUDE_vTaskDelete 1
 
 #endif /* FREERTOS_CONFIG_H */

@@ -1,0 +1,53 @@
+# Prerequisites
+*.d
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# Build directory
+/build/
+
+# External directoy
+/external/
+
+# Dependency files
+*.d
+
+# Editor/IDE specific files
+.vscode/
+.idea/
+
+# Dont track sonnar files
+.scannerwork/
+# db
+/data/
+
+/FreeRTOS/Demo/CORTEX_LM3S811_GCC/gcc/
+
