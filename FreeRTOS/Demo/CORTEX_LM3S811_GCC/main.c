@@ -136,12 +136,14 @@ SemaphoreHandle_t xButtonSemaphore;
 QueueHandle_t xPrintQueue;
 #define T_MAX                		34
 #define T_MIN               		18
-static unsigned int temperature = 	26;
+static int temperature = 	26;
 //TASKS
 static void vSensorTask( void *pvParameters );
 //-----
 static uint32_t _dwRandNext=1 ;
 uint32_t rand_number( void );
+void intToAscii(int number, char *buffer, int bufferSize);
+void GraphAxes(void);
 /*--------------Main function----------------------*/
 
 int main( void )
@@ -164,9 +166,7 @@ int main( void )
 	vStartBlockingQueueTasks( mainBLOCK_Q_PRIORITY );
 
 	/* Start the tasks defined within the file. */
-	//xTaskCreate( vCheckTask, "Check", configMINIMAL_STACK_SIZE, NULL, mainCHECK_TASK_PRIORITY, NULL );
-	xTaskCreate( vSensorTask, "Sensor", configMINIMAL_STACK_SIZE, NULL, mainCHECK_TASK_PRIORITY-1, NULL );
-	//xTaskCreate( vButtonHandlerTask, "Status", configMINIMAL_STACK_SIZE, NULL, mainCHECK_TASK_PRIORITY + 1, NULL );
+	xTaskCreate( vSensorTask, "Sensor", configMINIMAL_STACK_SIZE, NULL, mainCHECK_TASK_PRIORITY+1, NULL );
 	xTaskCreate( vPrintTask, "Print", configMINIMAL_STACK_SIZE, NULL, mainCHECK_TASK_PRIORITY + 1, NULL );
 
 	/* Start the scheduler. */
@@ -198,12 +198,7 @@ static void vSensorTask( void *pvParameters )
 		/* Perform this check every mainCHECK_DELAY milliseconds. */
 		vTaskDelayUntil( &xLastExecutionTime, SENSOR_TIME );
 		//read sensor
-		temperature = (rand_number()% 2)? temperature + 1 : temperature - 1;	
-		// if(rand_number()% 2){
-		// 	temperature ++;
-		// } else {
-		// 	temperature --;
-		// }
+		temperature = (rand_number()% 2)? temperature + 1 : temperature - 1;
 		if(temperature > T_MAX){
 			temperature = T_MAX;
 		} else if (temperature < T_MIN){
@@ -233,58 +228,7 @@ uint32_t rand_number( void )
 
     return (uint32_t)(_dwRandNext/131072) % 65536 ;
 }
-/*----------------------------------------------------------------*/
-static void vCheckTask( void *pvParameters )
-{
-portBASE_TYPE xErrorOccurred = pdFALSE;
-TickType_t xLastExecutionTime;
-const char *pcPassMessage = "PASS";
-const char *pcFailMessage = "FAIL";
 
-	/* Initialise xLastExecutionTime so the first call to vTaskDelayUntil()
-	works correctly. */
-	xLastExecutionTime = xTaskGetTickCount();
-
-	for( ;; )
-	{
-		/* Perform this check every mainCHECK_DELAY milliseconds. */
-		vTaskDelayUntil( &xLastExecutionTime, mainCHECK_DELAY );
-
-		/* Has an error been found in any task? */
-
-		if( xAreIntegerMathsTaskStillRunning() != pdTRUE )
-		{
-			xErrorOccurred = pdTRUE;
-		}
-
-		if( xArePollingQueuesStillRunning() != pdTRUE )
-		{
-			xErrorOccurred = pdTRUE;
-		}
-
-		if( xAreSemaphoreTasksStillRunning() != pdTRUE )
-		{
-			xErrorOccurred = pdTRUE;
-		}
-
-		if( xAreBlockingQueuesStillRunning() != pdTRUE )
-		{
-			xErrorOccurred = pdTRUE;
-		}
-
-		/* Send either a pass or fail message.  If an error is found it is
-		never cleared again.  We do not write directly to the LCD, but instead
-		queue a message for display by the print task. */
-		if( xErrorOccurred == pdTRUE )
-		{
-			xQueueSend( xPrintQueue, &pcFailMessage, portMAX_DELAY );
-		}
-		else
-		{
-			xQueueSend( xPrintQueue, &pcPassMessage, portMAX_DELAY );
-		}
-	}
-}
 /*-----------------------------------------------------------*/
 
 static void prvSetupHardware( void )
@@ -292,15 +236,13 @@ static void prvSetupHardware( void )
 	/* Setup the PLL. */
 	SysCtlClockSet( SYSCTL_SYSDIV_10 | SYSCTL_USE_PLL | SYSCTL_OSC_MAIN | SYSCTL_XTAL_6MHZ );
 
-	/* Setup the push button. */
-	SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
-    GPIODirModeSet(GPIO_PORTC_BASE, mainPUSH_BUTTON, GPIO_DIR_MODE_IN);
-	GPIOIntTypeSet( GPIO_PORTC_BASE, mainPUSH_BUTTON,GPIO_FALLING_EDGE );
-	IntPrioritySet( INT_GPIOC, configKERNEL_INTERRUPT_PRIORITY );
-	GPIOPinIntEnable( GPIO_PORTC_BASE, mainPUSH_BUTTON );
-	IntEnable( INT_GPIOC );
-
-
+	// /* Setup the push button. */
+	// SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
+    // GPIODirModeSet(GPIO_PORTC_BASE, mainPUSH_BUTTON, GPIO_DIR_MODE_IN);
+	// GPIOIntTypeSet( GPIO_PORTC_BASE, mainPUSH_BUTTON,GPIO_FALLING_EDGE );
+	// IntPrioritySet( INT_GPIOC, configKERNEL_INTERRUPT_PRIORITY );
+	// GPIOPinIntEnable( GPIO_PORTC_BASE, mainPUSH_BUTTON );
+	// IntEnable( INT_GPIOC );
 
 	/* Enable the UART.  */
 	SysCtlPeripheralEnable(SYSCTL_PERIPH_UART0);
@@ -313,9 +255,9 @@ static void prvSetupHardware( void )
 	/* Configure the UART for 8-N-1 operation. */
 	UARTConfigSet( UART0_BASE, mainBAUD_RATE, UART_CONFIG_WLEN_8 | UART_CONFIG_PAR_NONE | UART_CONFIG_STOP_ONE );
 
-	/* We don't want to use the fifo.  This is for test purposes to generate
-	as many interrupts as possible. */
-	HWREG( UART0_BASE + UART_O_LCR_H ) &= ~mainFIFO_SET;
+	// /* We don't want to use the fifo.  This is for test purposes to generate
+	// as many interrupts as possible. */
+	// HWREG( UART0_BASE + UART_O_LCR_H ) &= ~mainFIFO_SET;
 
 	/* Enable Tx interrupts. */
 	HWREG( UART0_BASE + UART_O_IM ) |= UART_INT_TX;
@@ -407,19 +349,85 @@ portBASE_TYPE xHigherPriorityTaskWoken = pdFALSE;
 
 static void vPrintTask( void *pvParameters )
 {
-char *pcMessage;
-unsigned portBASE_TYPE uxLine = 0, uxRow = 0;
+	char *pcMessage;
+	uint8_t temp;
+	uint8_t bufTmp[2]; //2bytes
+	char *N_temp[4]; //4bytes to be safe(255'\0')
+	
+	int displayCounter = 20;
 
+	UBaseType_t uxHighWaterMark;
+	uxHighWaterMark = uxTaskGetStackHighWaterMark( NULL );
+	if(uxHighWaterMark < 1)
+		while (true);
+
+	OSRAMClear();
 	for( ;; )
 	{
 		/* Wait for a message to arrive. */
-		xQueueReceive( xPrintQueue, &pcMessage, SENSOR_TIME );
+		xQueueReceive( xPrintQueue, &temp, SENSOR_TIME );
 
 		/* Write the message to the LCD. */
-		//uxRow++;
-		uxLine++;
-		OSRAMClear();
-		OSRAMStringDraw( pcMessage, uxLine & 0x3f, uxRow & 0x01);
+		intToAscii(temp, N_temp, 3);
+		OSRAMStringDraw("T:", 0, 0);
+		OSRAMStringDraw(N_temp, 9, 0);
+		OSRAMStringDraw("N:", 0, 1); //next line lcd
+		OSRAMStringDraw("1", 8, 1);
+		GraphAxes();
+
+
+		uxHighWaterMark = uxTaskGetStackHighWaterMark( NULL );
+		if(uxHighWaterMark < 1)
+		while (true);
 	}
 }
 
+void intToAscii(int number, char *buffer, int bufferSize)
+{
+    if (number == 0)
+    {
+        buffer[0] = '0';
+        buffer[1] = '\0';
+        return;
+    }
+
+    int index = 0;
+
+    // separate the digits
+    while (number > 0 && index < bufferSize - 1)
+    {
+        buffer[index++] = '0' + (number % 10); //obtain the last digit
+        number /= 10;
+    }
+
+    // Add the null
+    buffer[index] = '\0';
+
+    // Reorder the digits
+    for (int i = 0; i < index / 2; i++)
+    {
+        char temp = buffer[i];
+        buffer[i] = buffer[index - i - 1];
+        buffer[index - i - 1] = temp;
+    }
+}
+void GraphAxes(void)
+{
+	int x_start = 20;
+	unsigned char yaxis[] = {0xFF, 0xFF};
+	OSRAMImageDraw(yaxis, 20, 0, 1, 2);
+	uint8_t xaxis[] = {0x00, 0x80};
+	OSRAMImageDraw(xaxis, x_start+1, 0, 1, 2);
+
+	for (int i = x_start + 1; i < 96; i++)
+	{
+		OSRAMImageDraw(xaxis, i, 0, 1, 2);
+	}
+	if (x_start < 96)
+		x_start++;
+	else
+	{
+		x_start = 20;
+	}
+}
+/*-----------------------------------------------------------*/
