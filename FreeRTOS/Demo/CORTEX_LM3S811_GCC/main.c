@@ -25,44 +25,6 @@
  */
 
 
-/*
- * This project contains an application demonstrating the use of the
- * FreeRTOS.org mini real time scheduler on the Luminary Micro LM3S811 Eval
- * board.  See http://www.FreeRTOS.org for more information.
- *
- * main() simply sets up the hardware, creates all the demo application tasks,
- * then starts the scheduler.  http://www.freertos.org/a00102.html provides
- * more information on the standard demo tasks.
- *
- * In addition to a subset of the standard demo application tasks, main.c also
- * defines the following tasks:
- *
- * + A 'Print' task.  The print task is the only task permitted to access the
- * LCD - thus ensuring mutual exclusion and consistent access to the resource.
- * Other tasks do not access the LCD directly, but instead send the text they
- * wish to display to the print task.  The print task spends most of its time
- * blocked - only waking when a message is queued for display.
- *
- * + A 'Button handler' task.  The eval board contains a user push button that
- * is configured to generate interrupts.  The interrupt handler uses a
- * semaphore to wake the button handler task - demonstrating how the priority
- * mechanism can be used to defer interrupt processing to the task level.  The
- * button handler task sends a message both to the LCD (via the print task) and
- * the UART where it can be viewed using a dumb terminal (via the UART to USB
- * converter on the eval board).  NOTES:  The dumb terminal must be closed in
- * order to reflash the microcontroller.  A very basic interrupt driven UART
- * driver is used that does not use the FIFO.  19200 baud is used.
- *
- * + A 'check' task.  The check task only executes every five seconds but has a
- * high priority so is guaranteed to get processor time.  Its function is to
- * check that all the other tasks are still operational and that no errors have
- * been detected at any time.  If no errors have every been detected 'PASS' is
- * written to the display (via the print task) - if an error has ever been
- * detected the message is changed to 'FAIL'.  The position of the message is
- * changed for each write.
- */
-
-
 #include <stdio.h> 
 
 /* Environment includes. */
@@ -103,15 +65,13 @@ efficient. */
 #define mainNO_DELAY				( ( TickType_t ) 0 )
 //this is for 10HZ
 #define SENSOR_TIME ((TickType_t)100 / portTICK_PERIOD_MS)
+
+#define X_VALUE 75 //96-21 75 values total in the graph
 /*
  * Configure the processor and peripherals for this demo.
  */
 static void prvSetupHardware( void );
 
-/*
- * The 'check' task, as described at the top of this file.
- */
-static void vCheckTask( void *pvParameters );
 
 /*
  * The task that is woken by the ISR that processes GPIO interrupts originating
@@ -122,7 +82,7 @@ static void vButtonHandlerTask( void *pvParameters );
 /*
  * The task that controls access to the LCD.
  */
-static void vPrintTask( void *pvParameter );
+static void vGraphTask( void *pvParameter );
 
 /* String that is transmitted on the UART. */
 static char *cMessage = "Task woken by button interrupt! --- ";
@@ -143,7 +103,8 @@ static void vSensorTask( void *pvParameters );
 static uint32_t _dwRandNext=1 ;
 uint32_t rand_number( void );
 void intToAscii(int number, char *buffer, int bufferSize);
-void GraphAxes(void);
+void PositionInGraph(uint8_t tmp, uint8_t pos_graph[2]);
+void GraphValues(uint8_t temp, uint8_t *bufTmp, int *x_start);
 /*--------------Main function----------------------*/
 
 int main( void )
@@ -167,7 +128,7 @@ int main( void )
 
 	/* Start the tasks defined within the file. */
 	xTaskCreate( vSensorTask, "Sensor", configMINIMAL_STACK_SIZE, NULL, mainCHECK_TASK_PRIORITY+1, NULL );
-	xTaskCreate( vPrintTask, "Print", configMINIMAL_STACK_SIZE, NULL, mainCHECK_TASK_PRIORITY + 1, NULL );
+	xTaskCreate( vGraphTask, "Graph", configMINIMAL_STACK_SIZE, NULL, mainCHECK_TASK_PRIORITY + 1, NULL );
 
 	/* Start the scheduler. */
 	vTaskStartScheduler();
@@ -236,13 +197,6 @@ static void prvSetupHardware( void )
 	/* Setup the PLL. */
 	SysCtlClockSet( SYSCTL_SYSDIV_10 | SYSCTL_USE_PLL | SYSCTL_OSC_MAIN | SYSCTL_XTAL_6MHZ );
 
-	// /* Setup the push button. */
-	// SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
-    // GPIODirModeSet(GPIO_PORTC_BASE, mainPUSH_BUTTON, GPIO_DIR_MODE_IN);
-	// GPIOIntTypeSet( GPIO_PORTC_BASE, mainPUSH_BUTTON,GPIO_FALLING_EDGE );
-	// IntPrioritySet( INT_GPIOC, configKERNEL_INTERRUPT_PRIORITY );
-	// GPIOPinIntEnable( GPIO_PORTC_BASE, mainPUSH_BUTTON );
-	// IntEnable( INT_GPIOC );
 
 	/* Enable the UART.  */
 	SysCtlPeripheralEnable(SYSCTL_PERIPH_UART0);
@@ -255,9 +209,6 @@ static void prvSetupHardware( void )
 	/* Configure the UART for 8-N-1 operation. */
 	UARTConfigSet( UART0_BASE, mainBAUD_RATE, UART_CONFIG_WLEN_8 | UART_CONFIG_PAR_NONE | UART_CONFIG_STOP_ONE );
 
-	// /* We don't want to use the fifo.  This is for test purposes to generate
-	// as many interrupts as possible. */
-	// HWREG( UART0_BASE + UART_O_LCR_H ) &= ~mainFIFO_SET;
 
 	/* Enable Tx interrupts. */
 	HWREG( UART0_BASE + UART_O_IM ) |= UART_INT_TX;
@@ -347,14 +298,14 @@ portBASE_TYPE xHigherPriorityTaskWoken = pdFALSE;
 }
 /*-----------------------------------------------------------*/
 
-static void vPrintTask( void *pvParameters )
+static void vGraphTask( void *pvParameters )
 {
-	char *pcMessage;
+
 	uint8_t temp;
 	uint8_t bufTmp[2]; //2bytes
 	char *N_temp[4]; //4bytes to be safe(255'\0')
+	int x_start = 21;
 	
-	int displayCounter = 20;
 
 	UBaseType_t uxHighWaterMark;
 	uxHighWaterMark = uxTaskGetStackHighWaterMark( NULL );
@@ -373,12 +324,14 @@ static void vPrintTask( void *pvParameters )
 		OSRAMStringDraw(N_temp, 9, 0);
 		OSRAMStringDraw("N:", 0, 1); //next line lcd
 		OSRAMStringDraw("1", 8, 1);
-		GraphAxes();
+		
+		GraphValues(temp, bufTmp, &x_start);
 
 
 		uxHighWaterMark = uxTaskGetStackHighWaterMark( NULL );
-		if(uxHighWaterMark < 1)
+		if(uxHighWaterMark < 1){
 		while (true);
+		}
 	}
 }
 
@@ -394,13 +347,11 @@ void intToAscii(int number, char *buffer, int bufferSize)
     int index = 0;
 
     // separate the digits
-    while (number > 0 && index < bufferSize - 1)
-    {
+    while (number > 0 && index < bufferSize - 1){
         buffer[index++] = '0' + (number % 10); //obtain the last digit
         number /= 10;
     }
 
-    // Add the null
     buffer[index] = '\0';
 
     // Reorder the digits
@@ -411,23 +362,46 @@ void intToAscii(int number, char *buffer, int bufferSize)
         buffer[index - i - 1] = temp;
     }
 }
-void GraphAxes(void)
-{
-	int x_start = 20;
-	unsigned char yaxis[] = {0xFF, 0xFF};
-	OSRAMImageDraw(yaxis, 20, 0, 1, 2);
-	uint8_t xaxis[] = {0x00, 0x80};
-	OSRAMImageDraw(xaxis, x_start+1, 0, 1, 2);
 
-	for (int i = x_start + 1; i < 96; i++)
+void PositionInGraph(uint8_t tmp, uint8_t pos_graph[2]){
+	uint8_t lRow = 0x80; //0b10000000
+	uint8_t uRow = 0;
+	if (tmp == T_MAX)
 	{
-		OSRAMImageDraw(xaxis, i, 0, 1, 2);
+		pos_graph[0] = 0x01;
+		pos_graph[1] = 0x80;
+		return;
 	}
-	if (x_start < 96)
-		x_start++;
-	else
+	
+	int pxl = 7 - ((tmp-T_MIN) % 8); //map the correct pixel
+
+	if (tmp < 26)
 	{
-		x_start = 20;
+		lRow |= (1 << pxl);
 	}
+	else{
+		uRow |= (1 << pxl);
+	}
+
+	pos_graph[0] = uRow;
+	pos_graph[1] = lRow;
+}
+
+void GraphValues(uint8_t temp, uint8_t *bufTmp, int *x_start)
+{
+    unsigned char y[] = {0xFF, 0xFF};
+    OSRAMImageDraw(y, 20, 0, 1, 2);
+
+    PositionInGraph(temp, bufTmp);
+    uint8_t x[] = {0x00, 0x80};
+    OSRAMImageDraw(bufTmp, *x_start, 0, 1, 2);
+    for (int i = *x_start + 1; i < 96; i++)
+    {
+        OSRAMImageDraw(x, i, 0, 1, 2);
+    }
+    if (*x_start < 96)
+        (*x_start)++;
+    else
+        *x_start = 21; //reset
 }
 /*-----------------------------------------------------------*/
