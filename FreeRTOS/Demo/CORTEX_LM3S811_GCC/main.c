@@ -74,18 +74,11 @@ static void prvSetupHardware( void );
 
 
 /*
- * The task that is woken by the ISR that processes GPIO interrupts originating
- * from the push button.
- */
-static void vButtonHandlerTask( void *pvParameters );
-
-/*
  * The task that controls access to the LCD.
  */
-static void vGraphTask( void *pvParameter );
+
 
 /* String that is transmitted on the UART. */
-static char *cMessage = "Task woken by button interrupt! --- ";
 static volatile char *pcNextChar;
 
 /* The semaphore used to wake the button handler task from within the GPIO
@@ -94,17 +87,25 @@ SemaphoreHandle_t xButtonSemaphore;
 
 /* The queue used to send strings to the print task for display on the LCD. */
 QueueHandle_t xPrintQueue;
+QueueHandle_t xFilterQueue;
 #define T_MAX                		34
 #define T_MIN               		18
+#define N_MAX						10
+static int size_N = 2;
 static int temperature = 	26;
 //TASKS
 static void vSensorTask( void *pvParameters );
+static void vFilterTask( void *pvParameters );
+static void vGraphTask ( void *pvParameters );
 //-----
 static uint32_t _dwRandNext=1 ;
+//FUNCTIONS
 uint32_t rand_number( void );
 void intToAscii(int number, char *buffer, int bufferSize);
 void PositionInGraph(uint8_t tmp, uint8_t pos_graph[2]);
 void GraphValues(uint8_t temp, uint8_t *bufTmp, int *x_start);
+int getAverageValue(int *values, int values_size, int n_value);
+
 /*--------------Main function----------------------*/
 
 int main( void )
@@ -114,21 +115,17 @@ int main( void )
 
 	/* Create the semaphore used to wake the button handler task from the GPIO
 	ISR. */
-	vSemaphoreCreateBinary( xButtonSemaphore );
-	xSemaphoreTake( xButtonSemaphore, 0 );
+	// vSemaphoreCreateBinary( xButtonSemaphore );
+	// xSemaphoreTake( xButtonSemaphore, 0 );
 
 	/* Create the queue used to pass message to vPrintTask. */
-	xPrintQueue = xQueueCreate( mainQUEUE_SIZE, sizeof( char * ) );
-
-	/* Start the standard demo tasks. */
-	vStartIntegerMathTasks( tskIDLE_PRIORITY );
-	vStartPolledQueueTasks( mainQUEUE_POLL_PRIORITY );
-	vStartSemaphoreTasks( mainSEM_TEST_PRIORITY );
-	vStartBlockingQueueTasks( mainBLOCK_Q_PRIORITY );
+	xPrintQueue  = xQueueCreate( mainQUEUE_SIZE, sizeof( char * ) );
+	xFilterQueue = xQueueCreate( mainQUEUE_SIZE, sizeof( char * ) );
 
 	/* Start the tasks defined within the file. */
-	xTaskCreate( vSensorTask, "Sensor", configMINIMAL_STACK_SIZE, NULL, mainCHECK_TASK_PRIORITY+1, NULL );
-	xTaskCreate( vGraphTask, "Graph", configMINIMAL_STACK_SIZE, NULL, mainCHECK_TASK_PRIORITY + 1, NULL );
+	xTaskCreate( vSensorTask, "Sensor", configMINIMAL_STACK_SIZE, NULL, mainCHECK_TASK_PRIORITY +1, NULL );
+	xTaskCreate( vGraphTask,  "Graph", configMINIMAL_STACK_SIZE, NULL, mainCHECK_TASK_PRIORITY  -1, NULL );
+	xTaskCreate( vFilterTask, "Filter", configMINIMAL_STACK_SIZE, NULL, mainCHECK_TASK_PRIORITY , NULL );
 
 	/* Start the scheduler. */
 	vTaskStartScheduler();
@@ -166,19 +163,59 @@ static void vSensorTask( void *pvParameters )
 			temperature = T_MIN;
 		}
 
-		//xQueueSend( xPrintQueue, &temperature, portMAX_DELAY );
-
 		uxHighWaterMarkSensor = uxTaskGetStackHighWaterMark(NULL);
 		if(uxHighWaterMarkSensor < 1){
 			vTaskDelete(NULL);//stop task
 		}
-		if (xQueueSend(xPrintQueue, &temperature, mainCHECK_DELAY) != pdPASS)
+		if (xQueueSend(xFilterQueue, &temperature, portMAX_DELAY) != pdPASS)
 		{
 			OSRAMClear();
 			OSRAMStringDraw("FULL", 0, 0);
 			while (true){};
 		}
 	}
+}
+
+static void vFilterTask( void *pvParameters )
+{	
+	UBaseType_t uxHighWaterMarkSensor;
+	int temp;
+	int values_temp[N_MAX]={};
+	int temp_filtered;
+
+
+
+	uxHighWaterMarkSensor = uxTaskGetStackHighWaterMark( NULL );
+	if(uxHighWaterMarkSensor < 1){
+		vTaskDelete(NULL);//stop task
+	}
+
+	while (true)
+	{
+		if(xQueueReceive(xFilterQueue, &temp, portMAX_DELAY) != pdPASS){
+			while (true){};
+		}
+		//update values
+		for(int i =1; i < N_MAX; i++){
+			values_temp[i] = values_temp[i-1];
+		}
+		values_temp[0]=temp;
+		//filter
+		temp_filtered = getAverageValue(values_temp, N_MAX, size_N);
+		//send to print
+		if(xQueueSend(xPrintQueue, &temp_filtered, portMAX_DELAY) != pdPASS){
+			OSRAMClear();
+			OSRAMStringDraw("FULL", 0, 0);
+			while (true){};
+		}
+
+		uxHighWaterMarkSensor = uxTaskGetStackHighWaterMark(NULL);
+		if(uxHighWaterMarkSensor < 1){
+			vTaskDelete(NULL);//stop task
+		}
+	}
+	
+
 }
 
 // From https://github.com/istarc/freertos/blob/master/FreeRTOS/Demo/CORTEX_A5_SAMA5D3x_Xplained_IAR/AtmelFiles/libboard_sama5d3x-ek/source/rand.c
@@ -223,40 +260,6 @@ static void prvSetupHardware( void )
 }
 /*-----------------------------------------------------------*/
 
-static void vButtonHandlerTask( void *pvParameters )
-{
-const char *pcInterruptMessage = "Int";
-
-	for( ;; )
-	{
-		/* Wait for a GPIO interrupt to wake this task. */
-		while( xSemaphoreTake( xButtonSemaphore, portMAX_DELAY ) != pdPASS );
-
-		/* Start the Tx of the message on the UART. */
-		UARTIntDisable( UART0_BASE, UART_INT_TX );
-		{
-			pcNextChar = cMessage;
-
-			/* Send the first character. */
-			if( !( HWREG( UART0_BASE + UART_O_FR ) & UART_FR_TXFF ) )
-			{
-				HWREG( UART0_BASE + UART_O_DR ) = *pcNextChar;
-			}
-
-			pcNextChar++;
-		}
-		UARTIntEnable(UART0_BASE, UART_INT_TX);
-
-		/* Queue a message for the print task to display on the LCD. */
-		xQueueSend( xPrintQueue, &pcInterruptMessage, portMAX_DELAY );
-
-		/* Make sure we don't process bounces. */
-		vTaskDelay( mainDEBOUNCE_DELAY );
-		xSemaphoreTake( xButtonSemaphore, mainNO_DELAY );
-	}
-}
-
-/*-----------------------------------------------------------*/
 
 void vUART_ISR(void)
 {
@@ -316,14 +319,15 @@ static void vGraphTask( void *pvParameters )
 	for( ;; )
 	{
 		/* Wait for a message to arrive. */
-		xQueueReceive( xPrintQueue, &temp, SENSOR_TIME );
+		xQueueReceive( xPrintQueue, &temp, portMAX_DELAY );
 
 		/* Write the message to the LCD. */
 		intToAscii(temp, N_temp, 3);
 		OSRAMStringDraw("T:", 0, 0);
 		OSRAMStringDraw(N_temp, 9, 0);
 		OSRAMStringDraw("N:", 0, 1); //next line lcd
-		OSRAMStringDraw("1", 8, 1);
+		intToAscii(size_N, N_temp, 3);
+		OSRAMStringDraw(N_temp, 8, 1);
 		
 		GraphValues(temp, bufTmp, &x_start);
 
@@ -403,5 +407,18 @@ void GraphValues(uint8_t temp, uint8_t *bufTmp, int *x_start)
         (*x_start)++;
     else
         *x_start = 21; //reset
+}
+
+int getAverageValue(int *values, int values_size, int n_value)
+{
+	int sum = 0;
+	if (n_value>values_size){
+		while (true);//error window > values_size		
+	}
+	for(int i = 0; i < n_value; i++){
+		sum += values[i];
+	}
+
+	return sum/n_value;
 }
 /*-----------------------------------------------------------*/
