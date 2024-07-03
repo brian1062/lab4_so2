@@ -50,4 +50,4 @@
 /data/
 
 /FreeRTOS/Demo/CORTEX_LM3S811_GCC/gcc/
-
+/FreeRTOS/Demo/CORTEX_LM3S811_GCC/__pycache__/

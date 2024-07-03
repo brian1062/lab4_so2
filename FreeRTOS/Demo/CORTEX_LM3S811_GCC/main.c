@@ -47,7 +47,7 @@
 
 /* UART configuration - note this does not use the FIFO so is not very
 efficient. */
-#define mainBAUD_RATE				( 19200 )
+#define mainBAUD_RATE				( 9600 )
 #define mainFIFO_SET				( 0x10 )
 
 /* Demo task priorities. */
@@ -88,6 +88,7 @@ SemaphoreHandle_t xButtonSemaphore;
 /* The queue used to send strings to the print task for display on the LCD. */
 QueueHandle_t xPrintQueue;
 QueueHandle_t xFilterQueue;
+QueueHandle_t xUartRQueue;
 #define T_MAX                		34
 #define T_MIN               		18
 #define N_MAX						10
@@ -121,6 +122,7 @@ int main( void )
 	/* Create the queue used to pass message to vPrintTask. */
 	xPrintQueue  = xQueueCreate( mainQUEUE_SIZE, sizeof( char * ) );
 	xFilterQueue = xQueueCreate( mainQUEUE_SIZE, sizeof( char * ) );
+	xUartRQueue  = xQueueCreate( mainQUEUE_SIZE, sizeof( char * ) ); // for sincronization and protection of data
 
 	/* Start the tasks defined within the file. */
 	xTaskCreate( vSensorTask, "Sensor", configMINIMAL_STACK_SIZE, NULL, mainCHECK_TASK_PRIORITY +1, NULL );
@@ -231,39 +233,45 @@ uint32_t rand_number( void )
 
 static void prvSetupHardware( void )
 {
-	/* Setup the PLL. */
+	/* Setup the PLL. //TODO:ver para que sirve*/
 	SysCtlClockSet( SYSCTL_SYSDIV_10 | SYSCTL_USE_PLL | SYSCTL_OSC_MAIN | SYSCTL_XTAL_6MHZ );
 
 
 	/* Enable the UART.  */
 	SysCtlPeripheralEnable(SYSCTL_PERIPH_UART0);
-	SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOA);
+	// SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOA);
 
 	/* Set GPIO A0 and A1 as peripheral function.  They are used to output the
 	UART signals. */
-	GPIODirModeSet( GPIO_PORTA_BASE, GPIO_PIN_0 | GPIO_PIN_1, GPIO_DIR_MODE_HW );
+	// GPIODirModeSet( GPIO_PORTA_BASE, GPIO_PIN_0 | GPIO_PIN_1, GPIO_DIR_MODE_HW );
 
 	/* Configure the UART for 8-N-1 operation. */
 	UARTConfigSet( UART0_BASE, mainBAUD_RATE, UART_CONFIG_WLEN_8 | UART_CONFIG_PAR_NONE | UART_CONFIG_STOP_ONE );
 
 
 	/* Enable Tx interrupts. */
-	HWREG( UART0_BASE + UART_O_IM ) |= UART_INT_TX;
+	// HWREG( UART0_BASE + UART_O_IM ) |= UART_INT_TX;
+	// IntPrioritySet( INT_UART0, configKERNEL_INTERRUPT_PRIORITY );
+	// IntEnable( INT_UART0 );
+
+	/* Enable Rx interrupts. */
 	IntPrioritySet( INT_UART0, configKERNEL_INTERRUPT_PRIORITY );
+	UARTIntEnable(UART0_BASE, UART_INT_RX);
 	IntEnable( INT_UART0 );
 
 
 	/* Initialise the LCD> */
     OSRAMInit( false );
-    OSRAMStringDraw("www.FreeRTOS.org", 0, 0);
-	OSRAMStringDraw("LM3S811 demo", 16, 1);
+    // OSRAMStringDraw("www.FreeRTOS.org", 0, 0);
+	// OSRAMStringDraw("LM3S811 demo", 16, 1);
 }
 /*-----------------------------------------------------------*/
 
-
+//Interrupt service routine to change the value of size_N
 void vUART_ISR(void)
 {
-unsigned long ulStatus;
+	int rx;
+	unsigned long ulStatus;
 
 	/* What caused the interrupt. */
 	ulStatus = UARTIntStatus( UART0_BASE, pdTRUE );
@@ -272,16 +280,13 @@ unsigned long ulStatus;
 	UARTIntClear( UART0_BASE, ulStatus );
 
 	/* Was a Tx interrupt pending? */
-	if( ulStatus & UART_INT_TX )
+	if( ulStatus & UART_INT_RX )
 	{
-		/* Send the next character in the string.  We are not using the FIFO. */
-		if( *pcNextChar != 0 )
-		{
-			if( !( HWREG( UART0_BASE + UART_O_FR ) & UART_FR_TXFF ) )
-			{
-				HWREG( UART0_BASE + UART_O_DR ) = *pcNextChar;
-			}
-			pcNextChar++;
+		rx = UARTCharGet(UART0_BASE) - '0'; //convert to int
+
+		xQueueSend(xUartRQueue, &rx, portMAX_DELAY);
+		if(xQueueReceive(xUartRQueue, &size_N, 0) != pdPASS){
+			while (true){};
 		}
 	}
 }
