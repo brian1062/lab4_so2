@@ -1,11 +1,19 @@
 import serial
-import time
+import threading
 import argparse
+import time
+
+def read_uart(ser, is_running):
+    while is_running[0]:
+        if ser.in_waiting > 0:
+            time.sleep(0.15)
+            response = ser.read(ser.in_waiting).decode('utf-8')
+            print(f"{response}")
 
 def main():
-    # Set the command line argument
+    # Set up the command-line argument
     parser = argparse.ArgumentParser(description="Send messages via UART to a specific device.")
-    parser.add_argument("pts", type=int, help="pts port number (for example, 2 for /dev/pts/2)")
+    parser.add_argument("pts", type=int, help="Number of the pts port (e.g., 2 for /dev/pts/2)")
     args = parser.parse_args()
 
     # Configure the serial port
@@ -14,27 +22,30 @@ def main():
 
     try:
         # Open the connection to the serial port
-        ser = serial.Serial(port, baud_rate, timeout=1)
-        print(f"Connected to {port} a {baud_rate} baudios.")
+        ser = serial.Serial(port, baud_rate, bytesize=serial.EIGHTBITS, stopbits=serial.STOPBITS_ONE, parity=serial.PARITY_NONE, timeout=1)
+        print(f"Connected to {port} at {baud_rate} baud.")
+
+        is_running = [True] # Variable to control the loop
+
+        # Create and start the reading thread
+        reading_thread = threading.Thread(target=read_uart, args=(ser,is_running))
+        reading_thread.daemon = True
+        reading_thread.start()
 
         while True:
             # Read the message from standard input
-            mensaje = input("Write the message to send (or 'exit' to exit): ")
+            message = input("")#Enter the message to send (or 'exit' to quit): ")
 
-            if mensaje.lower() == 'exit':
+            if message.lower() == 'exit':
                 print("Closing the connection.")
+                is_running[0] = False
                 break
 
-            # Send the message through the serial port
-            ser.write(mensaje.encode('utf-8'))
-            print(f"Message sent: {mensaje}")
+            # Send the message via the serial port
+            ser.write(message.encode('utf-8'))
+            # print(f"Message sent: {message}")
 
-            # Read the response from the serial port
-            time.sleep(0.1)  # Wait a moment to allow the response
-            if ser.in_waiting > 0:
-                response = ser.read(ser.in_waiting).decode('utf-8')
-                print(f"Response received: {response}")
-
+        reading_thread.join()
         # Close the connection to the serial port
         ser.close()
 

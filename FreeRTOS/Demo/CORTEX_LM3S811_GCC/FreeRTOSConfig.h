@@ -69,6 +69,11 @@ to exclude the API function. */
 See http://www.FreeRTOS.org/RTOS-Cortex-M3-M4.html. */
 #define configMAX_SYSCALL_INTERRUPT_PRIORITY 	191 /* equivalent to 0xa0, or priority 5. */
 
+//https://www.freertos.org/rtos-run-time-stats.html
+#define configGENERATE_RUN_TIME_STATS 1
+#define portCONFIGURE_TIMER_FOR_RUN_TIME_STATS() 0UL
+#define portGET_RUN_TIME_COUNTER_VALUE() xTaskGetTickCount()
+
 #define configUSE_TRACE_FACILITY 1
 #define INCLUDE_uxTaskGetStackHighWaterMark 1
 #define INCLUDE_vTaskDelete 1

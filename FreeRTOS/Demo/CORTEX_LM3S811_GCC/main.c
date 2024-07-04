@@ -57,7 +57,7 @@ efficient. */
 #define mainBLOCK_Q_PRIORITY		( tskIDLE_PRIORITY + 2 )
 
 /* Demo board specifics. */
-#define mainPUSH_BUTTON             GPIO_PIN_4
+// #define mainPUSH_BUTTON             GPIO_PIN_4
 
 /* Misc. */
 #define mainQUEUE_SIZE				( 3 )
@@ -65,25 +65,13 @@ efficient. */
 #define mainNO_DELAY				( ( TickType_t ) 0 )
 //this is for 10HZ
 #define SENSOR_TIME ((TickType_t)100 / portTICK_PERIOD_MS)
-
-#define X_VALUE 75 //96-21 75 values total in the graph
+#define STATS_TIME  ((TickType_t)2500 / portTICK_PERIOD_MS)
 /*
  * Configure the processor and peripherals for this demo.
  */
 static void prvSetupHardware( void );
 
-
-/*
- * The task that controls access to the LCD.
- */
-
-
-/* String that is transmitted on the UART. */
-static volatile char *pcNextChar;
-
-/* The semaphore used to wake the button handler task from within the GPIO
-interrupt handler. */
-SemaphoreHandle_t xButtonSemaphore;
+TaskStatus_t *pxTaskStatusArray;
 
 /* The queue used to send strings to the print task for display on the LCD. */
 QueueHandle_t xPrintQueue;
@@ -98,6 +86,7 @@ static int temperature = 	26;
 static void vSensorTask( void *pvParameters );
 static void vFilterTask( void *pvParameters );
 static void vGraphTask ( void *pvParameters );
+static void vStatsTask ( void *pvParameters );
 //-----
 static uint32_t _dwRandNext=1 ;
 //FUNCTIONS
@@ -106,18 +95,16 @@ void intToAscii(int number, char *buffer, int bufferSize);
 void PositionInGraph(uint8_t tmp, uint8_t pos_graph[2]);
 void GraphValues(uint8_t temp, uint8_t *bufTmp, int *x_start);
 int getAverageValue(int *values, int values_size, int n_value);
+void sendStatsTasks(void);
+void sendStringToUart0(const char *string);
+
 
 /*--------------Main function----------------------*/
 
 int main( void )
 {
-	/* Configure the clocks, UART and GPIO. */
+	/* Configure the clocks, UART . */
 	prvSetupHardware();
-
-	/* Create the semaphore used to wake the button handler task from the GPIO
-	ISR. */
-	// vSemaphoreCreateBinary( xButtonSemaphore );
-	// xSemaphoreTake( xButtonSemaphore, 0 );
 
 	/* Create the queue used to pass message to vPrintTask. */
 	xPrintQueue  = xQueueCreate( mainQUEUE_SIZE, sizeof( char * ) );
@@ -126,8 +113,9 @@ int main( void )
 
 	/* Start the tasks defined within the file. */
 	xTaskCreate( vSensorTask, "Sensor", configMINIMAL_STACK_SIZE, NULL, mainCHECK_TASK_PRIORITY +1, NULL );
-	xTaskCreate( vGraphTask,  "Graph", configMINIMAL_STACK_SIZE, NULL, mainCHECK_TASK_PRIORITY  -1, NULL );
-	xTaskCreate( vFilterTask, "Filter", configMINIMAL_STACK_SIZE, NULL, mainCHECK_TASK_PRIORITY , NULL );
+	xTaskCreate( vGraphTask,  "Graph" , configMINIMAL_STACK_SIZE, NULL, mainCHECK_TASK_PRIORITY -1, NULL );
+	xTaskCreate( vFilterTask, "Filter", configMINIMAL_STACK_SIZE, NULL, mainCHECK_TASK_PRIORITY   , NULL );
+	xTaskCreate( vStatsTask,  "Stats" , configMINIMAL_STACK_SIZE, NULL, mainCHECK_TASK_PRIORITY -1, NULL );
 
 	/* Start the scheduler. */
 	vTaskStartScheduler();
@@ -233,7 +221,7 @@ uint32_t rand_number( void )
 
 static void prvSetupHardware( void )
 {
-	/* Setup the PLL. //TODO:ver para que sirve*/
+	/* Setup the PLL. */
 	SysCtlClockSet( SYSCTL_SYSDIV_10 | SYSCTL_USE_PLL | SYSCTL_OSC_MAIN | SYSCTL_XTAL_6MHZ );
 
 
@@ -292,19 +280,6 @@ void vUART_ISR(void)
 }
 /*-----------------------------------------------------------*/
 
-void vGPIO_ISR( void )
-{
-portBASE_TYPE xHigherPriorityTaskWoken = pdFALSE;
-
-	/* Clear the interrupt. */
-	GPIOPinIntClear(GPIO_PORTC_BASE, mainPUSH_BUTTON);
-
-	/* Wake the button handler task. */
-	xSemaphoreGiveFromISR( xButtonSemaphore, &xHigherPriorityTaskWoken );
-
-	portEND_SWITCHING_ISR( xHigherPriorityTaskWoken );
-}
-/*-----------------------------------------------------------*/
 
 static void vGraphTask( void *pvParameters )
 {
@@ -425,5 +400,87 @@ int getAverageValue(int *values, int values_size, int n_value)
 	}
 
 	return sum/n_value;
+}
+// From https://www.freertos.org/uxTaskGetSystemState.html
+static void vStatsTask(void *pvParameters)
+{
+	TickType_t xLastExecutionTime = xTaskGetTickCount();
+	volatile UBaseType_t uxArraySize;
+
+	/* Take a snapshot of the number of tasks in case it changes while this
+	function is executing. */
+	uxArraySize = uxTaskGetNumberOfTasks();
+
+	/* Allocate a TaskStatus_t structure for each task.  An array could be
+	allocated statically at compile time. */
+	pxTaskStatusArray = pvPortMalloc( uxArraySize * sizeof( TaskStatus_t ) );
+	
+	UBaseType_t uxHighWaterMark;
+	uxHighWaterMark = uxTaskGetStackHighWaterMark( NULL );
+	if(uxHighWaterMark < 1)
+		while (true);
+	while (true)
+	{
+		vTaskDelayUntil(&xLastExecutionTime, STATS_TIME);
+		sendStatsTasks();
+		uxHighWaterMark = uxTaskGetStackHighWaterMark( NULL );
+		if(uxHighWaterMark < 1)
+			while (true);
+
+	}
+	
+}
+
+void sendStatsTasks(void)
+{
+	volatile UBaseType_t uxArraySize, x;
+	unsigned long ulTotalRunTime, ulStatsAsPercentage;
+
+	if(pxTaskStatusArray != NULL)
+	{
+		/* Generate raw status information about each task. */
+		uxArraySize = uxTaskGetSystemState(pxTaskStatusArray,uxArraySize, &ulTotalRunTime);
+		/* For percentage calculations. */
+      	ulTotalRunTime /= 100UL;
+		// sendStringToUart0("/r");
+		sendStringToUart0("Task Name					pueba\n");
+		sendStringToUart0("------------------------------------------------\n");
+		/* Avoid divide by zero errors. */
+		if( ulTotalRunTime > 0 )
+		{
+			/* For each populated position in the pxTaskStatusArray array,
+			format the raw data as human readable ASCII data. */
+			for( x = 0; x < uxArraySize; x++ )
+			{
+				/* What percentage of the total run time has the task used?
+				This will always be rounded down to the nearest integer.
+				ulTotalRunTimeDiv100 has already been divided by 100. */
+				ulStatsAsPercentage =
+					pxTaskStatusArray[ x ].ulRunTimeCounter / ulTotalRunTime;
+
+				sendStringToUart0(pxTaskStatusArray[x].pcTaskName);
+				if( ulStatsAsPercentage > 0UL )
+				{
+
+				}
+				else
+				{
+				/* If the percentage is zero here then the task has
+				consumed less than 1% of the total run time. */
+				}
+
+         	}
+		}
+
+	}
+}
+//this funtion send a string to the uart0
+void sendStringToUart0(const char *string)
+{
+	while(*string != '\0')
+	{
+		UARTCharPut(UART0_BASE, *string++);
+	}
+	UARTCharPut(UART0_BASE, '\0');
 }
 /*-----------------------------------------------------------*/
