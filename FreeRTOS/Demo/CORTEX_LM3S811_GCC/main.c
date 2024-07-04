@@ -97,7 +97,8 @@ void GraphValues(uint8_t temp, uint8_t *bufTmp, int *x_start);
 int getAverageValue(int *values, int values_size, int n_value);
 void sendStatsTasks(void);
 void sendStringToUart0(const char *string);
-
+int getNumLength(long num);
+void longToStr(long num, char* buff);
 
 /*--------------Main function----------------------*/
 
@@ -112,10 +113,10 @@ int main( void )
 	xUartRQueue  = xQueueCreate( mainQUEUE_SIZE, sizeof( char * ) ); // for sincronization and protection of data
 
 	/* Start the tasks defined within the file. */
-	xTaskCreate( vSensorTask, "Sensor", configMINIMAL_STACK_SIZE, NULL, mainCHECK_TASK_PRIORITY +1, NULL );
-	xTaskCreate( vGraphTask,  "Graph" , configMINIMAL_STACK_SIZE, NULL, mainCHECK_TASK_PRIORITY -1, NULL );
-	xTaskCreate( vFilterTask, "Filter", configMINIMAL_STACK_SIZE, NULL, mainCHECK_TASK_PRIORITY   , NULL );
-	xTaskCreate( vStatsTask,  "Stats" , configMINIMAL_STACK_SIZE, NULL, mainCHECK_TASK_PRIORITY -1, NULL );
+	xTaskCreate( vSensorTask, "Sensor", SENSOR_STACK_SIZE, NULL, mainCHECK_TASK_PRIORITY +1, NULL );
+	xTaskCreate( vGraphTask,  "Graph" , GRAPH_STACK_SIZE , NULL, mainCHECK_TASK_PRIORITY -1, NULL );
+	xTaskCreate( vFilterTask, "Filter", FILTER_STACK_SIZE, NULL, mainCHECK_TASK_PRIORITY   , NULL );
+	xTaskCreate( vStatsTask,  "Stats" , STATS_STACK_SIZE , NULL, mainCHECK_TASK_PRIORITY -1, NULL );
 
 	/* Start the scheduler. */
 	vTaskStartScheduler();
@@ -138,7 +139,7 @@ static void vSensorTask( void *pvParameters )
 	xLastExecutionTime = xTaskGetTickCount();
 	uxHighWaterMarkSensor = uxTaskGetStackHighWaterMark( NULL );
 	if(uxHighWaterMarkSensor < 1){
-		vTaskDelete(NULL);//stop task
+		while (true){};
 	}
 
 	for( ;; )
@@ -155,12 +156,10 @@ static void vSensorTask( void *pvParameters )
 
 		uxHighWaterMarkSensor = uxTaskGetStackHighWaterMark(NULL);
 		if(uxHighWaterMarkSensor < 1){
-			vTaskDelete(NULL);//stop task
+			while (true){};
 		}
 		if (xQueueSend(xFilterQueue, &temperature, portMAX_DELAY) != pdPASS)
 		{
-			OSRAMClear();
-			OSRAMStringDraw("FULL", 0, 0);
 			while (true){};
 		}
 	}
@@ -177,7 +176,7 @@ static void vFilterTask( void *pvParameters )
 
 	uxHighWaterMarkSensor = uxTaskGetStackHighWaterMark( NULL );
 	if(uxHighWaterMarkSensor < 1){
-		vTaskDelete(NULL);//stop task
+		while (true){};
 	}
 
 	while (true)
@@ -194,14 +193,12 @@ static void vFilterTask( void *pvParameters )
 		temp_filtered = getAverageValue(values_temp, N_MAX, size_N);
 		//send to print
 		if(xQueueSend(xPrintQueue, &temp_filtered, portMAX_DELAY) != pdPASS){
-			OSRAMClear();
-			OSRAMStringDraw("FULL", 0, 0);
 			while (true){};
 		}
 
 		uxHighWaterMarkSensor = uxTaskGetStackHighWaterMark(NULL);
 		if(uxHighWaterMarkSensor < 1){
-			vTaskDelete(NULL);//stop task
+			while (true){};
 		}
 	}
 	
@@ -314,7 +311,7 @@ static void vGraphTask( void *pvParameters )
 
 		uxHighWaterMark = uxTaskGetStackHighWaterMark( NULL );
 		if(uxHighWaterMark < 1){
-		while (true);
+			while (true);
 		}
 	}
 }
@@ -435,6 +432,7 @@ void sendStatsTasks(void)
 {
 	volatile UBaseType_t uxArraySize, x;
 	unsigned long ulTotalRunTime, ulStatsAsPercentage;
+	char buf_tmp[16];
 
 	if(pxTaskStatusArray != NULL)
 	{
@@ -442,9 +440,10 @@ void sendStatsTasks(void)
 		uxArraySize = uxTaskGetSystemState(pxTaskStatusArray,uxArraySize, &ulTotalRunTime);
 		/* For percentage calculations. */
       	ulTotalRunTime /= 100UL;
-		// sendStringToUart0("/r");
-		sendStringToUart0("Task Name					pueba\n");
-		sendStringToUart0("------------------------------------------------\n");
+
+		sendStringToUart0("-----------------------------------------------------------------------------------\n");
+		sendStringToUart0("TaskName	TaskNumber	Time		StakFree	StakUsage	CPU%\n");
+		sendStringToUart0("-----------------------------------------------------------------------------------\n");
 		/* Avoid divide by zero errors. */
 		if( ulTotalRunTime > 0 )
 		{
@@ -458,16 +457,36 @@ void sendStatsTasks(void)
 				ulStatsAsPercentage =
 					pxTaskStatusArray[ x ].ulRunTimeCounter / ulTotalRunTime;
 
+				
 				sendStringToUart0(pxTaskStatusArray[x].pcTaskName);
-				if( ulStatsAsPercentage > 0UL )
+				sendStringToUart0("		");
+				intToAscii(pxTaskStatusArray[x].xTaskNumber, buf_tmp, 16);
+				sendStringToUart0(buf_tmp);
+				longToStr(pxTaskStatusArray[x].ulRunTimeCounter, buf_tmp);
+				sendStringToUart0("		");
+				sendStringToUart0(buf_tmp);
+				sendStringToUart0("		");
+				longToStr(pxTaskStatusArray[x].usStackHighWaterMark, &buf_tmp);
+				sendStringToUart0(buf_tmp);
+				if (pxTaskStatusArray[x].xTaskNumber == 1)
 				{
-
+					longToStr(SENSOR_STACK_SIZE-pxTaskStatusArray[x].usStackHighWaterMark, buf_tmp);
+				} else if (pxTaskStatusArray[x].xTaskNumber == 2){
+					longToStr(GRAPH_STACK_SIZE-pxTaskStatusArray[x].usStackHighWaterMark, buf_tmp);
+				} else if (pxTaskStatusArray[x].xTaskNumber == 3){
+					longToStr(FILTER_STACK_SIZE-pxTaskStatusArray[x].usStackHighWaterMark, buf_tmp);
+				} else if (pxTaskStatusArray[x].xTaskNumber == 4){
+					longToStr(STATS_STACK_SIZE-pxTaskStatusArray[x].usStackHighWaterMark, buf_tmp);
+				} else{
+					longToStr(configMINIMAL_STACK_SIZE-pxTaskStatusArray[x].usStackHighWaterMark, buf_tmp);
 				}
-				else
-				{
-				/* If the percentage is zero here then the task has
-				consumed less than 1% of the total run time. */
-				}
+				
+				sendStringToUart0("		");
+				sendStringToUart0(buf_tmp);
+				longToStr(ulStatsAsPercentage, buf_tmp);
+				sendStringToUart0("		");
+				sendStringToUart0(buf_tmp);
+				sendStringToUart0("\n");
 
          	}
 		}
@@ -481,6 +500,50 @@ void sendStringToUart0(const char *string)
 	{
 		UARTCharPut(UART0_BASE, *string++);
 	}
-	UARTCharPut(UART0_BASE, '\0');
+	// UARTCharPut(UART0_BASE, '\0');
+}
+
+// Function to obtain the length of the number representation in base 10
+int getNumLength(long num) {
+    int length = 0;
+    if (num == 0) {
+        return 1;
+    }
+    if (num < 0) {
+        length++; // For the negative sign
+        num = -num;
+    }
+    while (num > 0) {
+        length++;
+        num /= 10;
+    }
+    return length;
+}
+
+// Function to convert a long number to a string
+// Need a static buffer because compilation error is generated when using "malloc"
+void longToStr(long num, char* buff) {
+	long temp = num;
+    int length = getNumLength(temp); // Length of the resulting string
+
+    int isNegative = 0;
+    
+    buff[length] = '\0';
+    
+    if (temp < 0) {
+        isNegative = 1;
+        temp = -temp;
+    }
+    
+    // Fill the chain from back to front
+    for (int i = length - 1; i >= 0; i--) {
+        buff[i] = (temp % 10) + '0'; // Get the last digit and convert it to character
+        temp /= 10;
+    }
+    
+    if (isNegative) {
+        buff[0] = '-'; // Add the negative sign if necessary
+    }
+
 }
 /*-----------------------------------------------------------*/
