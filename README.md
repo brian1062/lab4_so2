@@ -52,6 +52,8 @@ En esa misma terminal si ingresamos valores entre 0 10 podemos cambiar el numero
 > [!WARNING]
 > size_N debe ser un número entero mayor que 0 y menor a 10. Por defecto, size_N es 2.
 
+[Demostracion de uso](https://github.com/brian1062/lab4_so2/issues/1)
+---
 ---
 
 ### Tareas Implementadas
@@ -167,6 +169,7 @@ En primera instancia se uso una stack grande por default para todas las tareas, 
 
 Por lo cual nuestra tabla de tareas nos queda de la siguiente manera:
 ![Tabla de tareas con watermark](/images/image2.png)
+
 Se aprecia como la StackFree de cada tarea es menor a la de la segunda imagen
 
 ## References
