@@ -46,7 +46,7 @@
 #define configTICK_RATE_HZ			( ( TickType_t ) 1000 )
 #define configMINIMAL_STACK_SIZE	( ( unsigned short ) 70 )
 #define SENSOR_STACK_SIZE   	    ( ( unsigned short ) 33 )
-#define GRAPH_STACK_SIZE	        ( ( unsigned short ) 60 ) //62
+#define GRAPH_STACK_SIZE	        ( ( unsigned short ) 60 ) 
 #define FILTER_STACK_SIZE   	    ( ( unsigned short ) 48 )
 #define STATS_STACK_SIZE	        ( ( unsigned short ) 50 )
 #define configTOTAL_HEAP_SIZE		( ( size_t ) ( 7000 ) )

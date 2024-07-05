@@ -91,8 +91,8 @@ static void vStatsTask ( void *pvParameters );
 static uint32_t _dwRandNext=1 ;
 //FUNCTIONS
 uint32_t rand_number( void );
-void intToAscii(int number, char *buffer, int bufferSize);
-void PositionInGraph(uint8_t tmp, uint8_t pos_graph[2]);
+void intToStr(int number, char *buffer, int bufferSize);
+void positionInGraph(uint8_t tmp, uint8_t pos_graph[2]);
 void GraphValues(uint8_t temp, uint8_t *bufTmp, int *x_start);
 int getAverageValue(int *values, int values_size, int n_value);
 void sendStatsTasks(void);
@@ -299,11 +299,11 @@ static void vGraphTask( void *pvParameters )
 		xQueueReceive( xPrintQueue, &temp, portMAX_DELAY );
 
 		/* Write the message to the LCD. */
-		intToAscii(temp, N_temp, 3);
+		intToStr(temp, N_temp, 3);
 		OSRAMStringDraw("T:", 0, 0);
 		OSRAMStringDraw(N_temp, 9, 0);
 		OSRAMStringDraw("N:", 0, 1); //next line lcd
-		intToAscii(size_N, N_temp, 3);
+		intToStr(size_N, N_temp, 3);
 		OSRAMStringDraw(N_temp, 8, 1);
 		
 		GraphValues(temp, bufTmp, &x_start);
@@ -316,7 +316,7 @@ static void vGraphTask( void *pvParameters )
 	}
 }
 
-void intToAscii(int number, char *buffer, int bufferSize)
+void intToStr(int number, char *buffer, int bufferSize)
 {
     if (number == 0)
     {
@@ -344,9 +344,9 @@ void intToAscii(int number, char *buffer, int bufferSize)
     }
 }
 
-void PositionInGraph(uint8_t tmp, uint8_t pos_graph[2]){
+void positionInGraph(uint8_t tmp, uint8_t pos_graph[2]){
+	uint8_t uRow = 0x00;
 	uint8_t lRow = 0x80; //0b10000000
-	uint8_t uRow = 0;
 	if (tmp == T_MAX)
 	{
 		pos_graph[0] = 0x01;
@@ -373,7 +373,7 @@ void GraphValues(uint8_t temp, uint8_t *bufTmp, int *x_start)
     unsigned char y[] = {0xFF, 0xFF};
     OSRAMImageDraw(y, 20, 0, 1, 2);
 
-    PositionInGraph(temp, bufTmp);
+    positionInGraph(temp, bufTmp);
     uint8_t x[] = {0x00, 0x80};
     OSRAMImageDraw(bufTmp, *x_start, 0, 1, 2);
     for (int i = *x_start + 1; i < 96; i++)
@@ -460,7 +460,7 @@ void sendStatsTasks(void)
 				
 				sendStringToUart0(pxTaskStatusArray[x].pcTaskName);
 				sendStringToUart0("		");
-				intToAscii(pxTaskStatusArray[x].xTaskNumber, buf_tmp, 16);
+				intToStr(pxTaskStatusArray[x].xTaskNumber, buf_tmp, 16);
 				sendStringToUart0(buf_tmp);
 				longToStr(pxTaskStatusArray[x].ulRunTimeCounter, buf_tmp);
 				sendStringToUart0("		");
