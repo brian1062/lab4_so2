@@ -45,6 +45,10 @@
 #define configCPU_CLOCK_HZ			( ( unsigned long ) 20000000 )
 #define configTICK_RATE_HZ			( ( TickType_t ) 1000 )
 #define configMINIMAL_STACK_SIZE	( ( unsigned short ) 70 )
+#define SENSOR_STACK_SIZE   	    ( ( unsigned short ) 33 )
+#define GRAPH_STACK_SIZE	        ( ( unsigned short ) 60 ) 
+#define FILTER_STACK_SIZE   	    ( ( unsigned short ) 48 )
+#define STATS_STACK_SIZE	        ( ( unsigned short ) 50 )
 #define configTOTAL_HEAP_SIZE		( ( size_t ) ( 7000 ) )
 #define configMAX_TASK_NAME_LEN		( 10 )
 #define configUSE_TRACE_FACILITY	0
@@ -69,6 +73,13 @@ to exclude the API function. */
 See http://www.FreeRTOS.org/RTOS-Cortex-M3-M4.html. */
 #define configMAX_SYSCALL_INTERRUPT_PRIORITY 	191 /* equivalent to 0xa0, or priority 5. */
 
+//https://www.freertos.org/rtos-run-time-stats.html
+#define configGENERATE_RUN_TIME_STATS 1
+#define portCONFIGURE_TIMER_FOR_RUN_TIME_STATS() 0UL
+#define portGET_RUN_TIME_COUNTER_VALUE() xTaskGetTickCount()
 
+#define configUSE_TRACE_FACILITY 1
+#define INCLUDE_uxTaskGetStackHighWaterMark 1
+#define INCLUDE_vTaskDelete 1
 
 #endif /* FREERTOS_CONFIG_H */
